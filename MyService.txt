@@ -1,0 +1,218 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Timers;
+using Azure.Identity;
+using Azure.Messaging.EventHubs;
+using Azure.Messaging.EventHubs.Producer;
+using Newtonsoft.Json;
+
+namespace WinServices
+{
+    class MyService
+    {
+        // Eventhub CS
+        static string ehConnectionString = ConfigurationManager.AppSettings["EHCS"];
+        static string ehName = ConfigurationManager.AppSettings["EHN"];
+
+        // Varaibles initialization
+        int numOfEvents = 3;
+        
+       
+
+        //File name maipulation
+
+        string fileName = @"C:\example_folder\Data" + "-" + FormatConverter.date + " " + FormatConverter.time + ".json";
+
+        // Input data
+        List<Data> GetData =
+            new List<Data>() {
+                new Data(){
+        PointId= 804, Name="Event5000", Type="Float64", Value=130.51327091199966,Quality= "Good",Mode= "Add", TimeStamp="2/16/2023 1:37:05 PM"},
+             new Data(){
+        PointId= 805, Name="Event5000", Type="Float64", Value=130.51327091199966,Quality= "Good",Mode= "Add", TimeStamp="2/16/2023 1:37:05 PM"},
+             new Data(){
+        PointId= 806, Name="Event5000", Type="Float64", Value=130.51327091199966,Quality= "Good",Mode= "Add", TimeStamp="2/16/2023 1:37:05 PM"}};
+
+        //Eventhub code
+        EventHubProducerClient producerClient = new EventHubProducerClient(ehConnectionString, ehName);
+
+        // Log4net
+        private static log4net.ILog Log = log4net.LogManager.GetLogger(typeof(Program));
+
+        // Create a timer to run every 30 seconds
+        //Timer timer = new Timer(CheckForNewFiles, folderPath, 0, 20000);
+
+        private readonly System.Timers.Timer _Timer;
+        private readonly System.Timers.Timer _Timer1;
+
+
+        public MyService()
+        {
+            this._Timer = new System.Timers.Timer();
+            this._Timer.Elapsed += new
+            System.Timers.ElapsedEventHandler(refreshjson);
+            this._Timer.Enabled = true;
+            this._Timer.Interval = 10000;
+
+            this._Timer1 = new System.Timers.Timer();
+            this._Timer1.Elapsed += new
+            System.Timers.ElapsedEventHandler(CheckForNewFiles);
+            this._Timer1.Enabled = true;
+            this._Timer1.Interval = 35000;
+
+        }
+        
+      
+        //Timer timer1 = new Timer(refreshjson, fp, 0, 10000);
+
+
+        // start methos
+        public  void Start()
+        {
+            // code executes when the Windows Service starts up.
+            
+            // Create a batch of events 
+            Log.Info("Start method execution started");
+            SendData();
+        }
+
+        //Stop Method
+        public async void Stop()
+        {
+            Log.Info("Stop method execution started");
+            await producerClient.DisposeAsync();
+        }
+       
+
+        // Get events from source and send it to Eventhub
+        public async void SendData()
+        {
+            var json = JsonConvert.SerializeObject(GetData);
+            try
+            {
+                EventDataBatch eventBatch = await producerClient.CreateBatchAsync();
+
+                foreach (var GD in GetData)
+                {
+                    if (!eventBatch.TryAdd(new EventData(Encoding.UTF8.GetBytes(json))))
+                    {
+                        // if it is too large for the batch
+                        throw new Exception($"Event is too large for the batch and cannot be sent.");
+                    }
+
+                }             
+
+                // Use the producer client to send the batch of events to the event hub
+                await producerClient.SendAsync(eventBatch);
+                Console.WriteLine($"A batch of  events has been published.");
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+
+                string jsonString = System.Text.Json.JsonSerializer.Serialize(GetData);
+                File.WriteAllText(fileName, jsonString);
+
+                Console.WriteLine(File.ReadAllText(fileName));
+            }
+        }
+        
+
+            // Getting all the configurations from json file
+            public  void refreshjson(object sender, ElapsedEventArgs args)
+        {
+            _Timer.Stop();
+            _Timer.Dispose();
+            string fp = @"C:\config";
+            Console.WriteLine("Starting config json method");
+            string[] files = Directory.GetFiles(fp.ToString());
+            foreach (string file in files)
+            {
+                // Read the data from the file
+                string data = File.ReadAllText(file);
+
+                MyData[] datas = System.Text.Json.JsonSerializer.Deserialize<MyData[]>(data);
+
+                foreach (var item in datas)
+                {
+                   WriteLine("Key" + " " + item.Key + " " + "Value" + " " + item.Value);
+                }
+            }
+           
+            
+        }
+
+
+        //Check for Buffer files and process the data to Event hub
+       public  void CheckForNewFiles(object sender, ElapsedEventArgs args)
+        {
+           
+             string folderPath = @"C:\example_folder";
+            try
+            {
+                // Get the list of files in the specified folder
+                string[] files = Directory.GetFiles(folderPath.ToString());
+                if (files.Length != 0)
+                {
+                    SendData sd = new SendData();
+                    // Process each file in the folder
+                    foreach (string file in files)
+                    {
+                        // Read the data from the file
+                        string data = File.ReadAllText(file);
+
+                        sd.SendEHData(data);
+                        // Process the data here...
+                        WriteLineRed($"Processing file: {file}");
+                        WriteLineRed($"Data: {data}");
+
+                        // Delete the file after processing 
+                        File.Delete(file);
+                    }
+
+                }
+                else
+                {
+                    WriteLineError("No Files");
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log any errors that occur
+                Console.WriteLine($"Error checking for new files: {ex.Message}");
+            }
+        }
+
+        public static void WriteLine(string buffer, ConsoleColor foreground = ConsoleColor.DarkGreen, ConsoleColor backgroundColor = ConsoleColor.Black)
+        {
+            Console.ForegroundColor = foreground;
+            Console.BackgroundColor = backgroundColor;
+            Console.WriteLine(buffer);
+            Console.ResetColor();
+        }
+        public static void WriteLineRed(string buffer, ConsoleColor foreground = ConsoleColor.DarkBlue, ConsoleColor backgroundColor = ConsoleColor.Black)
+        {
+            Console.ForegroundColor = foreground;
+            Console.BackgroundColor = backgroundColor;
+            Console.WriteLine(buffer);
+            Console.ResetColor();
+        }
+        public static void WriteLineError(string buffer, ConsoleColor foreground = ConsoleColor.DarkRed, ConsoleColor backgroundColor = ConsoleColor.Black)
+        {
+            Console.ForegroundColor = foreground;
+            Console.BackgroundColor = backgroundColor;
+            Console.WriteLine(buffer);
+            Console.ResetColor();
+        }
+    }
+
+}
+
