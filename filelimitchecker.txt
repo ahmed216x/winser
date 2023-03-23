@@ -1,0 +1,22 @@
+using Newtonsoft.Json;
+using System.IO;
+
+// define your JSON data
+var jsonData = new { name = "John", age = 30 };
+
+// define the file path and file name
+string filePath = @"C:\temp\myJsonFile.json";
+
+// check if the file size limit has been reached
+if (File.Exists(filePath) && new FileInfo(filePath).Length > 1000000) // 1,000,000 bytes = 1 megabyte
+{
+    // create a new file with a timestamp in the file name
+    filePath = $@"C:\temp\myJsonFile_{DateTime.Now:yyyyMMddHHmmss}.json";
+}
+
+// serialize the JSON data and write to the file
+using (StreamWriter sw = File.AppendText(filePath))
+{
+    JsonSerializer serializer = new JsonSerializer();
+    serializer.Serialize(sw, jsonData);
+}
